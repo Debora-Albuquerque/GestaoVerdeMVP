@@ -1,0 +1,176 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global Hardened Helpers
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidLatLng(lat, lng) {
+      return lat is number && lat >= -90 && lat <= 90 && lng is number && lng >= -180 && lng <= 180;
+    }
+
+    // Entity Validators
+    function isValidProducerProfile(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'farmName', 'region', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'farmName', 'region', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid == request.auth.uid && data.uid.size() <= 128
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100
+        && data.farmName is string && data.farmName.size() >= 2 && data.farmName.size() <= 120
+        && data.region is string && data.region.size() >= 2 && data.region.size() <= 80
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMicroarea(data) {
+      return data.keys().hasAll([
+          'ownerId', 'name', 'crop', 'sector', 'status',
+          'latitude', 'longitude', 'lastReportSummary', 'lastSeverity',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'name', 'crop', 'sector', 'status',
+          'latitude', 'longitude', 'lastReportSummary', 'lastSeverity',
+          'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string && data.ownerId == request.auth.uid && data.ownerId.size() <= 128
+        && data.name is string && data.name.size() >= 2 && data.name.size() <= 80
+        && data.crop is string && data.crop.size() >= 2 && data.crop.size() <= 50
+        && data.sector is string && data.sector.size() >= 2 && data.sector.size() <= 40
+        && data.status in ['saudavel', 'atencao', 'critico']
+        && isValidLatLng(data.latitude, data.longitude)
+        && data.lastReportSummary is string && data.lastReportSummary.size() <= 240
+        && data.lastSeverity in ['nenhuma', 'baixa', 'media', 'urgente']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidFieldReport(data) {
+      return data.keys().hasAll([
+          'ownerId', 'microareaId', 'microareaName', 'crop', 'transcript',
+          'pestProblem', 'pestCount', 'currentTreatment', 'treatmentEfficiency', 'recommendedSolution',
+          'severity', 'category', 'detectedKeywords', 'latitude', 'longitude',
+          'resolved', 'seasonMonth', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'microareaId', 'microareaName', 'crop', 'transcript',
+          'pestProblem', 'pestCount', 'currentTreatment', 'treatmentEfficiency', 'recommendedSolution',
+          'severity', 'category', 'detectedKeywords', 'latitude', 'longitude',
+          'resolved', 'seasonMonth', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string && data.ownerId == request.auth.uid && data.ownerId.size() <= 128
+        && isValidId(data.microareaId)
+        && data.microareaName is string && data.microareaName.size() >= 2 && data.microareaName.size() <= 80
+        && data.crop is string && data.crop.size() >= 2 && data.crop.size() <= 50
+        && data.transcript is string && data.transcript.size() >= 3 && data.transcript.size() <= 1000
+        && data.pestProblem is string && data.pestProblem.size() >= 2 && data.pestProblem.size() <= 160
+        && data.pestCount is string && data.pestCount.size() >= 2 && data.pestCount.size() <= 120
+        && data.currentTreatment is string && data.currentTreatment.size() >= 2 && data.currentTreatment.size() <= 200
+        && data.treatmentEfficiency in ['eficiente', 'parcial', 'ineficiente']
+        && data.recommendedSolution is string && data.recommendedSolution.size() >= 2 && data.recommendedSolution.size() <= 240
+        && data.severity in ['baixa', 'media', 'urgente']
+        && data.category in ['praga', 'doenca', 'irrigacao', 'clima', 'nutricao', 'geral']
+        && data.detectedKeywords is list && data.detectedKeywords.size() <= 10
+        && (data.detectedKeywords.size() == 0 || (data.detectedKeywords[0] is string && data.detectedKeywords[0].size() <= 40))
+        && isValidLatLng(data.latitude, data.longitude)
+        && data.resolved is bool
+        && data.seasonMonth is string && data.seasonMonth.size() == 7 && data.seasonMonth.matches('^[0-9]{4}-[0-9]{2}$')
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Users collection (owner-isolated PII protection)
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow create: if isSignedIn()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidProducerProfile(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isSignedIn()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidProducerProfile(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'farmName', 'region', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    // Microareas collection
+    match /microareas/{microareaId} {
+      allow get: if isSignedIn() && isValidId(microareaId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn()
+        && isValidId(microareaId)
+        && isValidMicroarea(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isSignedIn()
+        && isValidId(microareaId)
+        && existing().ownerId == request.auth.uid
+        && isValidMicroarea(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action 1: Update status/summary from new field report
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'lastReportSummary', 'lastSeverity', 'updatedAt'])
+          ||
+          // Action 2: Edit microarea details or GPS
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'crop', 'sector', 'latitude', 'longitude', 'updatedAt'])
+        );
+      allow delete: if isSignedIn() && isValidId(microareaId) && existing().ownerId == request.auth.uid;
+    }
+
+    // Field Reports collection
+    match /reports/{reportId} {
+      allow get: if isSignedIn() && isValidId(reportId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn()
+        && isValidId(reportId)
+        && isValidFieldReport(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && incoming().resolved == false
+        && exists(/databases/$(database)/documents/microareas/$(incoming().microareaId))
+        && get(/databases/$(database)/documents/microareas/$(incoming().microareaId)).data.ownerId == request.auth.uid;
+      allow update: if isSignedIn()
+        && isValidId(reportId)
+        && existing().ownerId == request.auth.uid
+        && existing().resolved == false
+        && isValidFieldReport(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().microareaId == existing().microareaId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().resolved == true
+        && incoming().diff(existing()).affectedKeys().hasOnly(['resolved', 'updatedAt']);
+      allow delete: if isSignedIn() && isValidId(reportId) && existing().ownerId == request.auth.uid;
+    }
+  }
+}

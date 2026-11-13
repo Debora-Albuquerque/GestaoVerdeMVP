@@ -1,0 +1,6 @@
+{
+  "name": "Gestão Verde — Monitoramento Agrícola",
+  "description": "Aplicativo mobile-first para produtores de hortaliças de Mogi das Cruzes (Alto Tietê), com previsão do tempo e alerta fitossanitário, relato de campo por voz com GPS, fila de prioridades e relatório de sazonalidade.",
+  "requestFramePermissions": ["microphone", "geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
