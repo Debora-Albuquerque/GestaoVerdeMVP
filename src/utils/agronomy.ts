@@ -389,6 +389,48 @@ export function mapAiEfficiencyToInternal(
   return 'parcial';
 }
 
+function buildLocalAiAnalysis(text: string): AiAnalysisResponse {
+  const classification = classifyFieldReport(text);
+  const efficiency = classifyEfficiencyFromSpeech(text) ?? 'parcial';
+  const normalized = normalizeText(text);
+
+  const count = ['muit', 'alta', 'forte', 'infest', 'bastante'].some((term) =>
+    normalized.includes(term)
+  )
+    ? 'Alta intensidade / múltiplos focos'
+    : ['pouco', 'baixa', 'inicio'].some((term) => normalized.includes(term))
+      ? 'Baixa intensidade / início de foco'
+      : 'Intensidade moderada observada em campo';
+
+  const actionLevel =
+    efficiency === 'ineficiente' || classification.severity === 'urgente'
+      ? 'Crítica/Urgente'
+      : classification.severity === 'media'
+        ? 'Média'
+        : 'Baixa';
+
+  return {
+    analysis: {
+      pragaDoenca: classification.suggestedProblem || 'Ocorrência fitossanitária em verificação',
+      contagemPopulosional: count,
+      tratamentoAtual: classification.suggestedTreatment || 'Nenhum combate aplicado ainda',
+      eficiencia:
+        efficiency === 'ineficiente'
+          ? 'Ineficiente'
+          : efficiency === 'eficiente'
+            ? 'Eficiente'
+            : 'Parcial',
+      nivelAcao: actionLevel,
+      recomendacaoSolucao:
+        classification.suggestedSolution ||
+        'Monitorar o canteiro nas próximas 24h e registrar a evolução da área afetada.',
+    },
+    provider: 'fallback',
+    warning:
+      'Análise local por palavras-chave (sem IA generativa). Valide a recomendação com um profissional agrônomo.',
+  };
+}
+
 export async function analisarRelatoComIA(
   textoDoRelato: string,
   microarea?: string
@@ -396,6 +438,10 @@ export async function analisarRelatoComIA(
   const cleanText = textoDoRelato.trim();
   if (cleanText.length < 3) {
     throw new Error('Informe ou grave pelo menos 3 caracteres antes de analisar com IA.');
+  }
+
+  if (import.meta.env.MODE === 'github-pages') {
+    return buildLocalAiAnalysis(cleanText);
   }
 
   const response = await fetch('/api/analyze-report', {
